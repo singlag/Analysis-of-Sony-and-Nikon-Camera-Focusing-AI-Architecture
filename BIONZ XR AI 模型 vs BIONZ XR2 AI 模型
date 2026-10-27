@@ -1,0 +1,35 @@
+BIONZ XR（A1 II）AI 模型 vs BIONZ XR2（A7M5 / A7R VI）AI 模型
+
+模型本身（Weights / Architecture）本質上係同一個高維度模型嘅「微調與擴展版」，但 NPU 硬體架構同部署方式變咗。
+如果拆開「模型 (Software Weight)」同「跑模型的 NPU (Hardware)」分析：
+
+1. 模型本身（AI Weight）：BIONZ XR2是 BIONZ XR的擴充升級版
+A7M5 / BIONZ XR2 使用的 AI 對焦模型，底子完全承襲自 A7R V / A1 II（即係 VIP8000 外掛 AI 晶片時代）開發出來的 18 點姿態估計 (Human Pose Estimation) + 語義分割 (Semantic Segmentation) 演算法。
+  ●	權重大小 (Model Size)：依然保持喺 ~40MB - 45MB 呢個級數（量化後），沒有使用舊時代或者尼康那種 2MB 精簡模型。
+  ●	模型改動 (What's New)：
+    1.	擴充了識別類別：在原本 18 點骨架的基礎上，加強了小動物/昆蟲、車輛細節（如賽車手頭盔、車輪軸心）的局部 Point 追蹤。
+    2.	加入 Auto 模式的路由模型 (Routing Network)：因為 BIONZ XR2 算力提升，多加了一層輕量級的「主體類別判斷」前置模型，用來實現自動切換人/車/鳥/動物（Auto 模式）。
+所以，AI 模型「演算法邏輯」沒有大分別，依然係 Sony 最強的高維度骨架模型。
+
+2. 硬體同部署（NPU & SoC Integration）：不在外掛，改為內嵌
+雖然模型系出同門，但載體（NPU 硬體）同數據通路 (Data Pipeline) 發生了根本性改變：
+  ●	BIONZ XR (VIP8000) 時代（A7R5 / A9III / A1 II）：
+    ○	架構：BIONZ XR 主晶片 + 外掛獨立 AI Processing Unit (VeriSilicon VIP8000 系列 IP)。
+    ○	瓶頸：模型要跑，ISP 要先將 Sensor 的圖像 Frame 經由 PCIe / 專用 Bus 搬去外掛 AI 晶片，AI 算完吐出 18 個骨架 Keypoints 座標，再傳返給主 CPU 做 AF 驅動。這個跨晶片搬運會有額外 2~4ms 嘅 Latency（延遲）同板級功耗。
+  ●	BIONZ XR2 時代（A7M5 / A7R VI）：
+    ○	架構：SoC 單晶片整合。NPU（升級到 VeriSilicon VIP9000 系列 IP 核心）直接 Integrate 到 BIONZ XR2 矽片內部。
+  ○	記憶體與頻寬：搭配升級的 LPDDR5 高頻寬內存，NPU 可以直接讀取 ISP 剛解出來的 Feature Map，省去了片外搬運數據。
+
+3. 升級後的實際效能差異
+	BIONZ XR (外掛VIP8000)	 BIONZ XR2 (集成 NPU)
+  模型體積	~41 MB	~41 MB - 45 MB (架構保持高維度)
+  NPU 部署	片外外掛 (External IC)	片內集成 (On-Chip NPU)
+  端到端 Latency	較高（需跨晶片 Bus 傳播）	極低（ISP 管道直通 NPU）
+  AF 運算刷新率	受限於片外 Bus 頻寬	可支援更高 FPS 實時對焦/曝光推導
+
+總結
+BIONZ XR2 的 AI 模型就是 VIP8000 上那套 18 點骨架/語義模型的大字號微調版，它沒有縮水，而是直接把這套模型「搬進了算力更高、頻寬更大、延遲更低」的 BIONZ XR2 內嵌 NPU 裡。
+Sources
+1.	新基準再定義索尼發佈全畫幅微單新基準Alpha 7 V - 索尼中國
+2.	Sony A7V 售價2萬｜BIONZ XR2配3300萬圖元｜30fps連拍4K60ff拍片
+3.	Sony Announces The Alpha 7R V With AI Tech & Advanced Video
