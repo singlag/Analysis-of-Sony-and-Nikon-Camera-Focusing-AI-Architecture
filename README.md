@@ -5,14 +5,16 @@ Analysis of Sony and Nikon Camera Focusing AI Architecture
 Sony α1 II (A1m2) 與 Nikon Z8/Z9 在 AF 硬體架構、深度學習模型部署以及計算視覺演算法路線 上的拆解解釋了為什麼兩台機器在實際複雜場景（如極小目標、人群交叉遮擋、背景雜亂）下的表現會有截然不同的“粘性”和穩定性。
 從硬體 NPU/DSP 計算力、模型體積精度、以及電腦視覺 (CV) 演算法流三個維度補充：
 
-1. 演算法與模型路線：姿態估計（Pose Estimation）與特徵追蹤的代際差
+1. 演算法與模型路線：
+   姿態估計（Pose Estimation）與特徵追蹤的代際差
   ●	索尼 α1 II (A1m2) 路線：基於深度分割與 18 點骨架的姿態估計 (Human Pose Estimation)
     ○	姿態估計與骨架構建：A1m2 依賴獨立 AI 晶片（AI Processing Unit），利用深度卷積神經網路運行 Human Pose Estimation，能夠即時提取人體 18 個關鍵骨架點（Keypoints）。這意味著即便人臉轉過去、被遮擋、或者戴著口罩墨鏡，AI 計算的不是“這塊區域像人臉”，而是“這個骨架構成的動力學與空間拓撲符合人體特徵”。
     ○	重構與抗遮擋 (Re-identification / Re-ID)：正如你所說，只要被捕獲過一次，骨架點在短時間內被遮擋後再出現，演算法可以通過姿態和骨架的空間連續性重新鎖定（Re-ID）。
     ○	身份註冊與多目標判別：在拍多人或體育賽事時，搭配人臉註冊，A1m2 不容易發生“焦點飛走”或跳到背景其他人身上的情況，因為它的特徵空間維度極高，具備更強的 Semantic Segmentation（語義分割）能力。
     ○	極小目標與複雜背景：針對遠處的鴿子、地板等極小或低對比度目標，索尼依靠更大容量的模型權重（約 41MB 量化模型）和更高維度的特徵提取，可以在圖元級完成 Target-vs-Background 的區分。
 
-●	尼康 Z8 / Z9 路線：YOLO 目標檢測 + CSK 深度特徵 + 光流 (Optical Flow)
+●	尼康 Z8 / Z9 路線：
+  YOLO 目標檢測 + CSK 深度特徵 + 光流 (Optical Flow)
     ○	檢測機制：尼康的 EXPEED 7 依賴的是相對傳統的 YOLO 邏輯（Bounding Box 畫框） + CSK (Circulant Structure Kernel) 深度特徵，輔以光流演算法（Optical Flow）來預測目標的運動向量。
     ○	局限性：這種演算法在目標顯眼、運動軌跡可預測時極快且省電，但一旦目標發生劇烈姿態形變（如運動員彎腰、轉頭、遮擋），Bounding Box 內的語義特徵會發生劇烈變化。因為缺乏對“骨架/拓撲結構”的感知，系統容易跟丟，或者將焦點轉移到前景/背景等高對比物體上。
 
