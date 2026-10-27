@@ -1,0 +1,58 @@
+Nikon EXPEED 7 晶片
+
+Nikon EXPEED 7為 Nikon 自研規格、由 Socionext 代工的客製 ASIC（Wikipedia 'Expeed' 及 Socionext 關係公開可查）內含 4× Cortex-A53 ＋ Ceva NeuPro-S 2000，實際 2–4 TOPS，根據 CEVA 原廠嘅 IP 規格，理論 AI 算力大約 2 到 3 TOPS (INT8)。
+算力推導與規格細節
+基本運算能力：
+NPS2000 每個時脈週期可以執行 2,000 個 8-bit MAC 運算。因為 1 個 MAC（乘加運算）等如 2 次 Operations（一次乘法、一次加法），所以每個週期可提供 4,000 次 Operations。
+
+時脈頻率與 TOPS 換算：
+根據不同的工藝製程與電壓設計，原廠設計的運行頻率與算力表現如下：
+  o	在 500 MHz 時脈下：2 TOPS。
+  o	在 750 MHz 時脈下：3 TOPS。 [1]
+
+拆解EXPEED 7核心參數同實際運算能力：
+1. 硬體架構與算力推算 (Hardware Specs)
+  ●	MAC 單元數量：NPS2000 命名中嘅 "2000" 代表佢每個 Clock Cycle 包含 2,000 個 8-bit MAC (Multiply-Accumulate) 單元（精確嚟講係 2,048 MACs）。
+  ●	運作頻率 (Clock Speed)：喺車載 / 相機呢類受限於功耗（TDP）嘅嵌入式 SoC 封裝入面，呢類 NPU 通常行喺 500 MHz - 750 MHz 左右（最高極限約 1.2GHz - 1.5GHz）。
+  ●	TOPS 計算公式：
+算力=2×MACs×Frequency
+  ○	600 MHz 頻率下：2×2048×0.6GHz≈2.46 TOPS (INT8)
+  ○	1 GHz 滿載頻率下：2×2048×1.0GHz≈4.09 TOPS (INT8)
+所以在 Socionext 幫尼康定制的晶片方案中，這顆 NPU 的實際可用算力基本上在 2 ~ 3 TOPS (INT8) 左右。
+
+2. 算力對模型部署嘅致命限制 (The Bottleneck)
+  1.	刷新率開銷 (FPS Requirement)： Z8/Z9 嘅 Stacked Sensor 需要以每秒 60 次甚至 120 次 (60Hz/120Hz) 嘅頻率做 AF 計算。
+    ○	算力每秒得 2.5×1012 次操作 (2.5 TOPS)。
+    ○	如果 AF 刷新率要行 120 FPS，即每一次 AF Frame 留給 NPU 嘅算力上限只有：
+      2.5 TOPS / 120 FPS  ≈ 20.8 GOPS / frame
+    ○	在 120 FPS 下，每幀留給 AI 的算力極度拮抗（只有約 20 GOPS）。要讓神經網絡在不足 8.3ms（1/120s）內跑完一次「影像 AF 取景」與「AI 語義推理」，模型必須被極致剪枝（Pruning）到 2MB 左右，否則 NPU 根本算不及跑一個最精簡版嘅 YOLOv5s目標檢測 (大約需要 16 GOPS/frame) 都非常勉強。
+  2.	「極致裁剪模型」： 正因為 Ceva NeuPro-S 2000 算力只有 2~3 TOPS，Nikon 根本無可能以120fps喺上面跑人體骨架（Pose Estimation）或者高維度 Semantic Segmentation 模型。
+    ○	結果：Nikon 只能將神經網絡剪枝（Pruning）壓縮到 ~2MB 左右，只保留基本的 Keypoint/Bounding Box 檢測，其餘嘅追焦邏輯（向量預測、遮擋恢復）全部交番畀傳統嘅 CSK 特徵匹配同光流法 (Optical Flow) 喺 CPU/DSP 處理。
+
+3. 代際算力對比 (Sony vs Nikon)
+  ●	Nikon Z8 / Z9 (Socionext + Ceva NPS2000)：
+    ○	~2 - 3 TOPS (INT8)
+    ○	模型大小：~2 MB
+  ●	Sony A1 II / A7R V (外掛芯原 VIP8000 AI Processing Unit)：
+    ○	~1.0 – 1.5 TOPS (INT8)
+    ○	模型大小：~41 MB
+  ●	Sony A7M5 / A7R VI (BIONZ XR2 內嵌 VIP9000)：
+    ○	~4.5 TOPS (INT8)
+    ○	支持 Transformer / 骨架姿態分割
+
+4. 記憶體結構（Memory Bandwidth & SRAM vs DRAM）
+神經網絡在推理時，最大的功耗與延遲往往不是「算加減乘除（MAC）」，而是「從 DRAM 讀取權重（Weights）」。
+  •	Nikon EXPEED 7 (Ceva NeuPro-S 2000)：
+    o	Ceva S2000 屬於傳統的嵌入式 IP 架構。為了在 Socionext 代工的整顆 EXPEED 7 主 SoC 內節省成本與功耗，分配給這顆 NPU 的片上 SRAM（On-chip SRAM）空間非常小，且缺少針對大模型權重的硬體解壓縮單元。一旦模型超過 SRAM 容納極限（幾 MB），就必須頻繁存取外部 DRAM，導致性能急劇下降。
+    o	如果模型如索尼一樣高達 40MB，NPU 就必須頻繁透過片內匯流排甚至外部 LPDDR 記憶體讀取權重。這會造成極大的 Bus 擠塞與巨大功耗，無法在每秒 120 次的對焦循環中完成。因此模型必須完全塞進極小的片上 Cache/SRAM 內，大小被迫限制在 ~2MB。 
+    o	Nikon (Ceva S2000) 屬於較早期的 Vision NPU IP，主要針對 2D 卷積（Conv2D）、Pooling、Softmax 等傳統 CNN 運算元做硬體優化。當面對索尼使用的高維度的 18/27 點 Human Pose Estimation（姿態估計）模型、Heatmap 推導、PAF（Part Affinity Fields）或 Re-ID 空間向量時，很多複雜運算元無法在 S2000 硬體上直接執行，必須退回 CPU/DSP 軟模擬，效率極低。因此 Nikon 只能採用 YOLO (Bounding Box 畫框) 這種運算元結構簡單、Ceva NPU 跑得最快的「傳統目標檢測網絡」。
+
+  •	Sony 外掛 AI 晶片 (VeriSilicon VIP8000)：
+    o	Sony 採用的是獨立晶片（External Dedicated IC）方案。這顆獨立晶片擁有專屬的內嵌 SRAM 緩存與極高 efficiency 的權重壓縮解壓硬體單元（Weight Compression Engine）。 專門為高維度神經網絡（Vision & Segmentation Neural Networks）設計，支援運算元融合（Operator Fusion）、跳躍連接（Skip Connection）以及多通道特徵提取的硬體加速。即使 Peak TOPS 只有 1.5，但它對姿態骨架模型（Pose Estimation）與語義分割模型（Semantic Segmentation）的硬體執行效率（Mac Utilization Rate）非常高，能把 1.5 TOPS 的實質利用率拉滿
+    o	41MB 的模型經過 INT8 / FP16 混合量化與高度壓縮後，能以極高的壓縮比存放在 SRAM/Flash 中，運行時透過硬體即時解壓推導，大幅降低了對外部記憶體頻寬的依賴。 
+
+總結：Nikon EXPEED 7內的 NeuPro-S 2000 算力大約 2.5 TOPS 左右。這算力做傳統「畫框識別+物體分類」效率極高且慳電，但面對索尼「姿態骨架 + 深度語義分割」嘅高維度深度學習模型，本質上就是“演算法世代差距”
+Sources
+1.	面對2020年15億個AI終端的市場需求，定制AI晶片成為趨勢| 雷峰網
+2.	面對2020年15億個AI終端的市場需求，定制AI晶片成為趨勢-電子頭條
+3.	Ceva Goes Automotive with New AI Core & 'Invite' API - EE Times
